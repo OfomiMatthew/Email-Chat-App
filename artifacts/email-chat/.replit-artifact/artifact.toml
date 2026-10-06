@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Email Chat"
+description = "A sleek private messaging app where people create accounts with email, find and add contacts by email, and start one-to-one conversations."
+version = "1.0.0"
+id = "artifacts/email-chat"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22876
+
+[services.development]
+run = "pnpm --filter @workspace/email-chat run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/email-chat", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/email-chat/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22876"
+BASE_PATH = "/"

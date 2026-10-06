@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Email-based direct messaging API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: chat
+    description: Profiles, contacts, and direct messages
 paths:
   /healthz:
     get:
@@ -24,6 +26,144 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /me:
+    get:
+      operationId: getMe
+      tags: [chat]
+      summary: Get the signed-in user's chat profile
+      responses:
+        "200":
+          description: Current profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatUser"
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [chat]
+      summary: Get compact account activity counts
+      responses:
+        "200":
+          description: Account activity summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /contacts:
+    get:
+      operationId: getContacts
+      tags: [chat]
+      summary: List the signed-in user's contacts
+      responses:
+        "200":
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatUser"
+    post:
+      operationId: addContact
+      tags: [chat]
+      summary: Add a contact using their email address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactInput"
+      responses:
+        "201":
+          description: Contact added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatUser"
+        "400":
+          description: Invalid email
+        "409":
+          description: The user is already a contact
+        "404":
+          description: No account is registered with that email
+  /conversations:
+    get:
+      operationId: getConversations
+      tags: [chat]
+      summary: List the signed-in user's conversations
+      responses:
+        "200":
+          description: Conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+    post:
+      operationId: createConversation
+      tags: [chat]
+      summary: Start or return a conversation with a contact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationInput"
+      responses:
+        "200":
+          description: Existing conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "201":
+          description: New conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+  /conversations/{conversationId}/messages:
+    parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getMessages
+      tags: [chat]
+      summary: List messages in a conversation
+      responses:
+        "200":
+          description: Conversation messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+    post:
+      operationId: sendMessage
+      tags: [chat]
+      summary: Send a message to a conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageInput"
+      responses:
+        "201":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "404":
+          description: Conversation not found
 components:
   schemas:
     HealthStatus:
@@ -33,4 +173,77 @@ components:
           type: string
       required:
         - status
-
+    ChatUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+      required: [id, email, displayName]
+    ContactInput:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 3
+      required: [email]
+    ConversationInput:
+      type: object
+      properties:
+        contactId:
+          type: string
+          minLength: 1
+      required: [contactId]
+    MessageInput:
+      type: object
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4000
+      required: [content]
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        senderId:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, conversationId, senderId, content, createdAt]
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        contact:
+          $ref: "#/components/schemas/ChatUser"
+        lastMessage:
+          anyOf:
+            - $ref: "#/components/schemas/Message"
+            - type: "null"
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, contact, lastMessage, updatedAt]
+    DashboardSummary:
+      type: object
+      properties:
+        contactCount:
+          type: integer
+        conversationCount:
+          type: integer
+        messageCount:
+          type: integer
+      required: [contactCount, conversationCount, messageCount]

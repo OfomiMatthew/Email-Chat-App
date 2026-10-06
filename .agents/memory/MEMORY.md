@@ -1,0 +1,1 @@
+- [Email Chat React compatibility](email-chat-react-compatibility.md) — keep Clerk’s React patch override local to this web artifact unless workspace and Expo constraints change.
