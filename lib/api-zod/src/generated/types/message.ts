@@ -5,6 +5,7 @@
  * Email-based direct messaging API
  * OpenAPI spec version: 0.1.0
  */
+import type { Attachment } from './attachment';
 
 export interface Message {
   id: number;
@@ -12,4 +13,5 @@ export interface Message {
   senderId: string;
   content: string;
   createdAt: Date;
+  attachments: Attachment[];
 }

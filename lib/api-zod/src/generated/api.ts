@@ -81,7 +81,14 @@ export const GetConversationsResponseItem = zod.object({
   "conversationId": zod.number().int(),
   "senderId": zod.string(),
   "content": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "attachments": zod.array(zod.object({
+  "id": zod.number().int(),
+  "fileName": zod.string(),
+  "contentType": zod.string(),
+  "size": zod.number().int(),
+  "url": zod.string()
+}))
 }),zod.null()]),
   "updatedAt": zod.coerce.date()
 })
@@ -110,7 +117,14 @@ export const CreateConversationResponse = zod.object({
   "conversationId": zod.number().int(),
   "senderId": zod.string(),
   "content": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "attachments": zod.array(zod.object({
+  "id": zod.number().int(),
+  "fileName": zod.string(),
+  "contentType": zod.string(),
+  "size": zod.number().int(),
+  "url": zod.string()
+}))
 }),zod.null()]),
   "updatedAt": zod.coerce.date()
 })
@@ -131,7 +145,14 @@ export const GetMessagesResponseItem = zod.object({
   "conversationId": zod.number().int(),
   "senderId": zod.string(),
   "content": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "attachments": zod.array(zod.object({
+  "id": zod.number().int(),
+  "fileName": zod.string(),
+  "contentType": zod.string(),
+  "size": zod.number().int(),
+  "url": zod.string()
+}))
 })
 export const GetMessagesResponse = zod.array(GetMessagesResponseItem)
 
@@ -149,9 +170,24 @@ export const SendMessageParams = zod.object({
 export const sendMessageBodyContentMax = 4000;
 
 
+export const sendMessageBodyAttachmentsItemFileNameMax = 180;
+
+export const sendMessageBodyAttachmentsItemContentTypeMax = 120;
+
+export const sendMessageBodyAttachmentsItemSizeMax = 26214400;
+
+export const sendMessageBodyAttachmentsMax = 8;
+
+
 
 export const SendMessageBody = zod.object({
-  "content": zod.string().min(1).max(sendMessageBodyContentMax)
+  "content": zod.string().max(sendMessageBodyContentMax).describe('Optional message text; send an empty string for attachment-only messages.'),
+  "attachments": zod.array(zod.object({
+  "objectPath": zod.string().min(1),
+  "fileName": zod.string().min(1).max(sendMessageBodyAttachmentsItemFileNameMax),
+  "contentType": zod.string().min(1).max(sendMessageBodyAttachmentsItemContentTypeMax),
+  "size": zod.number().int().min(1).max(sendMessageBodyAttachmentsItemSizeMax)
+})).max(sendMessageBodyAttachmentsMax).optional()
 })
 
 export const SendMessageResponse = zod.object({
@@ -159,7 +195,53 @@ export const SendMessageResponse = zod.object({
   "conversationId": zod.number().int(),
   "senderId": zod.string(),
   "content": zod.string(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "attachments": zod.array(zod.object({
+  "id": zod.number().int(),
+  "fileName": zod.string(),
+  "contentType": zod.string(),
+  "size": zod.number().int(),
+  "url": zod.string()
+}))
 })
+
+
+/**
+ * Returns a short-lived upload URL for direct upload to private object storage.
+ * @summary Request a presigned URL for a chat attachment
+ */
+
+export const requestUploadUrlBodyNameMax = 180;
+
+export const requestUploadUrlBodySizeMax = 26214400;
+
+export const requestUploadUrlBodyContentTypeMax = 120;
+
+
+
+export const RequestUploadUrlBody = zod.object({
+  "conversationId": zod.number().int().min(1),
+  "name": zod.string().min(1).max(requestUploadUrlBodyNameMax),
+  "size": zod.number().int().min(1).max(requestUploadUrlBodySizeMax),
+  "contentType": zod.string().min(1).max(requestUploadUrlBodyContentTypeMax)
+})
+
+export const RequestUploadUrlResponse = zod.object({
+  "uploadURL": zod.string().url(),
+  "objectPath": zod.string()
+})
+
+
+/**
+ * @summary Serve an attachment to a conversation participant
+ */
+
+
+
+export const GetChatAttachmentParams = zod.object({
+  "attachmentId": zod.coerce.number().int().min(1)
+})
+
+export const GetChatAttachmentResponse = zod.unknown()
 
 

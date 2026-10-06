@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: chat
     description: Profiles, contacts, and direct messages
+  - name: storage
+    description: Private chat attachment uploads and serving.
 paths:
   /healthz:
     get:
@@ -164,6 +166,55 @@ paths:
                 $ref: "#/components/schemas/Message"
         "404":
           description: Conversation not found
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a presigned URL for a chat attachment
+      description: Returns a short-lived upload URL for direct upload to private object storage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
+          description: Invalid upload metadata
+        "401":
+          description: Authentication required
+        "403":
+          description: User is not a participant in the conversation
+  /storage/attachments/{attachmentId}:
+    parameters:
+      - name: attachmentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getChatAttachment
+      tags: [storage]
+      summary: Serve an attachment to a conversation participant
+      responses:
+        "200":
+          description: Private attachment content
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Authentication required
+        "404":
+          description: Attachment not found or not accessible
 components:
   schemas:
     HealthStatus:
@@ -204,9 +255,48 @@ components:
       properties:
         content:
           type: string
-          minLength: 1
           maxLength: 4000
+          description: Optional message text; send an empty string for attachment-only messages.
+        attachments:
+          type: array
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/AttachmentInput"
       required: [content]
+    AttachmentInput:
+      type: object
+      properties:
+        objectPath:
+          type: string
+          minLength: 1
+        fileName:
+          type: string
+          minLength: 1
+          maxLength: 180
+        contentType:
+          type: string
+          minLength: 1
+          maxLength: 120
+        size:
+          type: integer
+          minimum: 1
+          maximum: 26214400
+      required: [objectPath, fileName, contentType, size]
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: integer
+        fileName:
+          type: string
+        contentType:
+          type: string
+        size:
+          type: integer
+        url:
+          type: string
+          format: uri-reference
+      required: [id, fileName, contentType, size, url]
     Message:
       type: object
       properties:
@@ -221,7 +311,11 @@ components:
         createdAt:
           type: string
           format: date-time
-      required: [id, conversationId, senderId, content, createdAt]
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+      required: [id, conversationId, senderId, content, createdAt, attachments]
     Conversation:
       type: object
       properties:
@@ -247,3 +341,31 @@ components:
         messageCount:
           type: integer
       required: [contactCount, conversationCount, messageCount]
+    UploadUrlRequest:
+      type: object
+      properties:
+        conversationId:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 180
+        size:
+          type: integer
+          minimum: 1
+          maximum: 26214400
+        contentType:
+          type: string
+          minLength: 1
+          maxLength: 120
+      required: [conversationId, name, size, contentType]
+    UploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+        objectPath:
+          type: string
+      required: [uploadURL, objectPath]

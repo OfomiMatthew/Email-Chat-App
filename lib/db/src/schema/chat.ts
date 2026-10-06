@@ -94,6 +94,24 @@ export const chatMessagesTable = pgTable(
   ],
 );
 
+export const chatAttachmentsTable = pgTable(
+  "chat_attachments",
+  {
+    id: serial("id").primaryKey(),
+    messageId: integer("message_id")
+      .notNull()
+      .references(() => chatMessagesTable.id, { onDelete: "cascade" }),
+    objectPath: text("object_path").notNull().unique(),
+    fileName: text("file_name").notNull(),
+    contentType: text("content_type").notNull(),
+    size: integer("size").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("chat_attachments_message_idx").on(table.messageId)],
+);
+
 export const insertChatUserSchema = createInsertSchema(chatUsersTable).omit({
   createdAt: true,
   updatedAt: true,
@@ -107,6 +125,9 @@ export const insertChatConversationSchema = createInsertSchema(
 export const insertChatMessageSchema = createInsertSchema(
   chatMessagesTable,
 ).omit({ id: true, createdAt: true });
+export const insertChatAttachmentSchema = createInsertSchema(
+  chatAttachmentsTable,
+).omit({ id: true, createdAt: true });
 
 export type InsertChatUser = z.infer<typeof insertChatUserSchema>;
 export type ChatUser = typeof chatUsersTable.$inferSelect;
@@ -118,3 +139,5 @@ export type InsertChatConversation = z.infer<
 export type ChatConversation = typeof chatConversationsTable.$inferSelect;
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 export type ChatMessage = typeof chatMessagesTable.$inferSelect;
+export type InsertChatAttachment = z.infer<typeof insertChatAttachmentSchema>;
+export type ChatAttachment = typeof chatAttachmentsTable.$inferSelect;

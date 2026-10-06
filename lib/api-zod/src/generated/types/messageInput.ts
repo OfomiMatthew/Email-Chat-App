@@ -5,11 +5,14 @@
  * Email-based direct messaging API
  * OpenAPI spec version: 0.1.0
  */
+import type { AttachmentInput } from './attachmentInput';
 
 export interface MessageInput {
   /**
-     * @minLength 1
+     * Optional message text; send an empty string for attachment-only messages.
      * @maxLength 4000
      */
   content: string;
+  /** @maxItems 8 */
+  attachments?: AttachmentInput[];
 }

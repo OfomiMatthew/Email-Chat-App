@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './attachment';
+export * from './attachmentInput';
 export * from './chatUser';
 export * from './contactInput';
 export * from './conversation';
@@ -14,3 +16,5 @@ export * from './dashboardSummary';
 export * from './healthStatus';
 export * from './message';
 export * from './messageInput';
+export * from './uploadUrlRequest';
+export * from './uploadUrlResponse';

@@ -25,12 +25,42 @@ export interface ConversationInput {
   contactId: string;
 }
 
-export interface MessageInput {
+export interface AttachmentInput {
+  /** @minLength 1 */
+  objectPath: string;
   /**
      * @minLength 1
+     * @maxLength 180
+     */
+  fileName: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  contentType: string;
+  /**
+     * @minimum 1
+     * @maximum 26214400
+     */
+  size: number;
+}
+
+export interface MessageInput {
+  /**
+     * Optional message text; send an empty string for attachment-only messages.
      * @maxLength 4000
      */
   content: string;
+  /** @maxItems 8 */
+  attachments?: AttachmentInput[];
+}
+
+export interface Attachment {
+  id: number;
+  fileName: string;
+  contentType: string;
+  size: number;
+  url: string;
 }
 
 export interface Message {
@@ -39,6 +69,7 @@ export interface Message {
   senderId: string;
   content: string;
   createdAt: string;
+  attachments: Attachment[];
 }
 
 export interface Conversation {
@@ -52,5 +83,30 @@ export interface DashboardSummary {
   contactCount: number;
   conversationCount: number;
   messageCount: number;
+}
+
+export interface UploadUrlRequest {
+  /** @minimum 1 */
+  conversationId: number;
+  /**
+     * @minLength 1
+     * @maxLength 180
+     */
+  name: string;
+  /**
+     * @minimum 1
+     * @maximum 26214400
+     */
+  size: number;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  contentType: string;
+}
+
+export interface UploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
 }
 
