@@ -1,6 +1,7 @@
 import base64
 import os
 import re
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +11,41 @@ from psycopg.rows import dict_row
 
 app = Flask(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL")
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+MAX_ATTACHMENTS_PER_MESSAGE = 8
+ALLOWED_ATTACHMENT_TYPES = {
+    "image/avif",
+    "image/bmp",
+    "image/gif",
+    "image/heic",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/ogg",
+    "audio/aac",
+    "audio/flac",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/ogg",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-wav",
+    "application/pdf",
+    "text/plain",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.presentation",
+}
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL must be configured for the chat API.")
@@ -58,7 +94,76 @@ def message_payload(row: dict[str, Any]) -> dict[str, Any]:
         "senderId": row["sender_id"],
         "content": row["content"],
         "createdAt": isoformat(row["created_at"]),
+        "attachments": row.get("attachments") or [],
     }
+
+
+def attachment_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "fileName": row["file_name"],
+        "contentType": row["content_type"],
+        "size": row["size"],
+        "url": f"/api/storage/attachments/{row['id']}",
+    }
+
+
+def attachment_aggregate_sql() -> str:
+    return """
+        COALESCE(
+          json_agg(json_build_object(
+            'id', a.id,
+            'fileName', a.file_name,
+            'contentType', a.content_type,
+            'size', a.size,
+            'url', '/api/storage/attachments/' || a.id::text
+          ) ORDER BY a.id) FILTER (WHERE a.id IS NOT NULL),
+          '[]'::json
+        )
+    """
+
+
+def validate_attachment_input(
+    item: Any, user_id: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    if not isinstance(item, dict):
+        return None, "An attachment entry is invalid."
+
+    object_path = item.get("objectPath")
+    file_name = item.get("fileName")
+    content_type = item.get("contentType")
+    size = item.get("size")
+    if not isinstance(object_path, str) or not isinstance(file_name, str):
+        return None, "Attachment details are missing."
+    if not isinstance(content_type, str) or not isinstance(size, int) or isinstance(size, bool):
+        return None, "Attachment details are invalid."
+    if size < 1 or size > MAX_ATTACHMENT_BYTES:
+        return None, "Each attachment must be 25 MiB or smaller."
+
+    normalized_type = content_type.split(";", 1)[0].strip().lower()
+    if normalized_type not in ALLOWED_ATTACHMENT_TYPES:
+        return None, "This attachment type is not supported."
+
+    owner_prefix = f"/objects/uploads/{user_id}/"
+    if not object_path.startswith(owner_prefix):
+        return None, "Attachments must be uploaded by the signed-in user."
+    object_id = object_path[len(owner_prefix):]
+    if not re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        object_id,
+        flags=re.IGNORECASE,
+    ):
+        return None, "The attachment reference is invalid."
+
+    safe_name = re.sub(r"[\x00-\x1f\x7f/\\]", "_", file_name).strip()[:180]
+    if not safe_name:
+        safe_name = "attachment"
+    return {
+        "object_path": object_path,
+        "file_name": safe_name,
+        "content_type": normalized_type,
+        "size": size,
+    }, None
 
 
 def ensure_current_user() -> dict[str, Any]:
@@ -89,6 +194,12 @@ def read_identity() -> Any:
         return
 
     user_id = request.headers.get("X-Chat-User-Id", "").strip()
+    if request.path.startswith("/internal/"):
+        if not user_id:
+            return jsonify({"error": "Internal authentication is required."}), 401
+        g.chat_identity = {"id": user_id}
+        return
+
     email = request.headers.get("X-Chat-Email", "").strip().lower()
     encoded_display_name = request.headers.get("X-Chat-Display-Name", "").strip()
 
@@ -119,6 +230,96 @@ def read_identity() -> Any:
 @app.get("/healthz")
 def health() -> tuple[Any, int]:
     return jsonify({"status": "ok"}), 200
+
+
+@app.get("/internal/conversations/<int:conversation_id>/upload-access")
+def internal_upload_access(conversation_id: int) -> Any:
+    user_id = g.chat_identity["id"]
+    with connection().cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM chat_conversations
+            WHERE id = %s
+              AND (participant_one_id = %s OR participant_two_id = %s)
+            """,
+            (conversation_id, user_id, user_id),
+        )
+        if cursor.fetchone() is None:
+            return jsonify({"error": "Conversation not found."}), 404
+    return jsonify({"ok": True})
+
+
+@app.get("/internal/conversations/<int:conversation_id>/call-access")
+def internal_call_access(conversation_id: int) -> Any:
+    user_id = g.chat_identity["id"]
+    with connection().cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+              caller.id AS caller_id,
+              caller.email AS caller_email,
+              caller.display_name AS caller_display_name,
+              peer.id AS peer_id,
+              peer.email AS peer_email,
+              peer.display_name AS peer_display_name
+            FROM chat_conversations c
+            JOIN chat_users caller ON caller.id = %s
+            JOIN chat_users peer ON peer.id = CASE
+              WHEN c.participant_one_id = %s THEN c.participant_two_id
+              ELSE c.participant_one_id
+            END
+            WHERE c.id = %s
+              AND (c.participant_one_id = %s OR c.participant_two_id = %s)
+            """,
+            (user_id, user_id, conversation_id, user_id, user_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return jsonify({"error": "Conversation not found."}), 404
+
+    return jsonify(
+        {
+            "caller": {
+                "id": row["caller_id"],
+                "email": row["caller_email"],
+                "displayName": row["caller_display_name"],
+            },
+            "peer": {
+                "id": row["peer_id"],
+                "email": row["peer_email"],
+                "displayName": row["peer_display_name"],
+            },
+        }
+    )
+
+
+@app.get("/internal/attachments/<int:attachment_id>/access")
+def internal_attachment_access(attachment_id: int) -> Any:
+    user_id = g.chat_identity["id"]
+    with connection().cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT a.object_path, a.file_name, a.content_type, a.size
+            FROM chat_attachments a
+            JOIN chat_messages m ON m.id = a.message_id
+            JOIN chat_conversations c ON c.id = m.conversation_id
+            WHERE a.id = %s
+              AND (c.participant_one_id = %s OR c.participant_two_id = %s)
+            """,
+            (attachment_id, user_id, user_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return jsonify({"error": "Attachment not found."}), 404
+    return jsonify(
+        {
+            "objectPath": row["object_path"],
+            "fileName": row["file_name"],
+            "contentType": row["content_type"],
+            "size": row["size"],
+        }
+    )
 
 
 @app.get("/me")
@@ -227,6 +428,17 @@ def conversation_payload(cursor: Any, conversation: dict[str, Any], user_id: str
         SELECT u.id, u.email, u.display_name,
                m.id AS message_id, m.conversation_id, m.sender_id,
                m.content, m.created_at AS message_created_at,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
+                   'id', a.id,
+                   'fileName', a.file_name,
+                   'contentType', a.content_type,
+                   'size', a.size,
+                   'url', '/api/storage/attachments/' || a.id::text
+                 ) ORDER BY a.id)
+                 FROM chat_attachments a
+                 WHERE a.message_id = m.id
+               ), '[]'::json) AS attachments,
                COALESCE(m.created_at, c.created_at) AS updated_at
         FROM chat_conversations c
         JOIN chat_users u ON u.id = %s
@@ -250,6 +462,7 @@ def conversation_payload(cursor: Any, conversation: dict[str, Any], user_id: str
             "senderId": row["sender_id"],
             "content": row["content"],
             "createdAt": isoformat(row["message_created_at"]),
+            "attachments": row["attachments"] or [],
         }
     return {
         "id": conversation["id"],
@@ -343,15 +556,38 @@ def messages(conversation_id: int) -> Any:
 
         cursor.execute(
             """
-            SELECT id, conversation_id, sender_id, content, created_at
-            FROM chat_messages
-            WHERE conversation_id = %s
-            ORDER BY created_at ASC, id ASC
+            SELECT m.id, m.conversation_id, m.sender_id, m.content, m.created_at
+            FROM chat_messages m
+            WHERE m.conversation_id = %s
+            ORDER BY m.created_at ASC, m.id ASC
             """,
             (conversation_id,),
         )
         rows = cursor.fetchall()
-    return jsonify([message_payload(row) for row in rows])
+        attachments_by_message: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        if rows:
+            message_ids = [row["id"] for row in rows]
+            cursor.execute(
+                """
+                SELECT id, message_id, file_name, content_type, size
+                FROM chat_attachments
+                WHERE message_id = ANY(%s)
+                ORDER BY id ASC
+                """,
+                (message_ids,),
+            )
+            for attachment in cursor.fetchall():
+                attachments_by_message[attachment["message_id"]].append(
+                    attachment_payload(attachment)
+                )
+    return jsonify(
+        [
+            message_payload(
+                {**row, "attachments": attachments_by_message[row["id"]]}
+            )
+            for row in rows
+        ]
+    )
 
 
 @app.post("/conversations/<int:conversation_id>/messages")
@@ -359,12 +595,26 @@ def send_message(conversation_id: int) -> Any:
     body = request.get_json(silent=True)
     content = body.get("content") if isinstance(body, dict) else None
     if not isinstance(content, str):
-        return jsonify({"error": "Write a message before sending."}), 400
+        return jsonify({"error": "Message text is invalid."}), 400
     content = content.strip()
-    if not content or len(content) > 4000:
-        return jsonify({"error": "Messages must contain 1 to 4000 characters."}), 400
+    if len(content) > 4000:
+        return jsonify({"error": "Messages must contain at most 4000 characters."}), 400
+
+    raw_attachments = body.get("attachments", [])
+    if not isinstance(raw_attachments, list) or len(raw_attachments) > MAX_ATTACHMENTS_PER_MESSAGE:
+        return jsonify({"error": "A message can contain up to 8 attachments."}), 400
 
     user_id = g.chat_user["id"]
+    attachments: list[dict[str, Any]] = []
+    for item in raw_attachments:
+        attachment, validation_error = validate_attachment_input(item, user_id)
+        if validation_error:
+            return jsonify({"error": validation_error}), 400
+        if attachment is not None:
+            attachments.append(attachment)
+    if not content and not attachments:
+        return jsonify({"error": "Write a message or attach a file before sending."}), 400
+
     with connection().cursor() as cursor:
         cursor.execute(
             """
@@ -386,7 +636,36 @@ def send_message(conversation_id: int) -> Any:
             (conversation_id, user_id, content),
         )
         message = cursor.fetchone()
-    return jsonify(message_payload(message)), 201
+        for attachment in attachments:
+            cursor.execute(
+                """
+                INSERT INTO chat_attachments
+                  (message_id, object_path, file_name, content_type, size)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    message["id"],
+                    attachment["object_path"],
+                    attachment["file_name"],
+                    attachment["content_type"],
+                    attachment["size"],
+                ),
+            )
+        cursor.execute(
+            """
+            SELECT id, file_name, content_type, size
+            FROM chat_attachments
+            WHERE message_id = %s
+            ORDER BY id ASC
+            """,
+            (message["id"],),
+        )
+        message_attachments = [
+            attachment_payload(row) for row in cursor.fetchall()
+        ]
+    return jsonify(
+        message_payload({**message, "attachments": message_attachments})
+    ), 201
 
 
 if __name__ == "__main__":

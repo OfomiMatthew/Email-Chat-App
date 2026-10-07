@@ -287,7 +287,7 @@ function ChatWorkspace() {
       const attachments = [];
       for (const file of selectedFiles) {
         if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} is larger than 25 MiB.`);
-        const contentType = file.type || fileContentType(file.name);
+        const contentType = file.type && file.type !== 'application/octet-stream' ? file.type : fileContentType(file.name);
         if (!isSupportedFile(file, contentType)) throw new Error(`${file.name} is not a supported file type.`);
         const upload = await requestUploadUrl.mutateAsync({ data: { conversationId: selectedId, name: file.name, size: file.size, contentType } });
         const result = await fetch(upload.uploadURL, { method: 'PUT', headers: { 'Content-Type': contentType }, body: file });
@@ -317,7 +317,7 @@ function ChatWorkspace() {
       setFeedback('Choose up to 8 files per message.');
       return;
     }
-    const invalid = additions.find((file) => file.size > 25 * 1024 * 1024 || !isSupportedFile(file, file.type || fileContentType(file.name)));
+    const invalid = additions.find((file) => file.size > 25 * 1024 * 1024 || !isSupportedFile(file, file.type && file.type !== 'application/octet-stream' ? file.type : fileContentType(file.name)));
     if (invalid) {
       setFeedback(invalid.size > 25 * 1024 * 1024 ? `${invalid.name} is larger than 25 MiB.` : `${invalid.name} is not a supported file type.`);
       return;
@@ -373,6 +373,8 @@ function ChatWorkspace() {
         </section>
       </div>
       {callSession.call && <CallSurface session={callSession} />}
+      {callSession.call?.mode === 'audio' && callSession.remoteStream && <MediaAudio stream={callSession.remoteStream} />}
+      {callSession.error && !callSession.call && <div className="fixed bottom-5 left-1/2 z-[70] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-[#ecd5cc] bg-[#fbf0ec] px-4 py-3 text-xs font-medium text-[#824c42] shadow-lg" role="status" data-testid="status-call-feedback">{callSession.error}<button type="button" onClick={callSession.dismissError} className="shrink-0 text-[#9a665e]" aria-label="Dismiss call message"><X size={14} /></button></div>}
       {feedback && <div className="fixed bottom-5 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-[#d9e3d6] bg-[#fbfaf5] px-4 py-3 text-xs font-medium text-[#42624e] shadow-lg" role="status" data-testid="status-action-feedback"><Check size={14} />{feedback}<button onClick={() => setFeedback('')} className="ml-2 text-[#78857d]" aria-label="Dismiss message" data-testid="button-dismiss-feedback"><X size={14} /></button></div>}
       {contactDialogOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#18352b]/35 px-4 py-6 backdrop-blur-[3px]" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContactDialogOpen(false); }}><div role="dialog" aria-modal="true" aria-labelledby="add-contact-heading" className="w-full max-w-[440px] animate-enter rounded-[27px] border border-[#e0ded3] bg-[#fbfaf4] p-6 shadow-[0_30px_90px_rgba(24,53,43,.23)] sm:p-8" data-testid="dialog-add-contact"><div className="flex items-start justify-between"><div><div className="grid h-11 w-11 place-items-center rounded-2xl bg-[#e3ecdf] text-[#426b59]"><Mail size={19} /></div><h2 id="add-contact-heading" className="font-display mt-5 text-[25px] font-extrabold tracking-[-.055em]">Find your person.</h2><p className="mt-1 text-sm text-[#7d8980]">All you need is their email address.</p></div><button type="button" onClick={() => setContactDialogOpen(false)} className="grid h-9 w-9 place-items-center rounded-xl text-[#829087] hover:bg-[#eeece3]" aria-label="Close" data-testid="button-close-add-contact"><X size={17} /></button></div><form onSubmit={handleAddContact} className="mt-7"><label htmlFor="contact-email" className="mb-2 block text-xs font-semibold text-[#4c6257]">Email address</label><div className="flex items-center gap-2 rounded-[14px] border border-[#dcded3] bg-[#fffdf8] px-3.5 focus-within:border-[#91ad96]"><Mail size={16} className="shrink-0 text-[#829087]" /><input id="contact-email" type="email" required autoFocus value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} placeholder="name@example.com" className="h-[48px] min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#a1a79f]" data-testid="input-contact-email" /></div><p className="mt-2 flex items-center gap-1.5 text-[11px] text-[#87938a]"><LockKeyhole size={12} /> No mobile numbers. No contact uploads.</p><button type="submit" disabled={!contactEmail.trim() || addContact.isPending || createConversation.isPending} className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-[#285b4c] py-3.5 text-sm font-semibold text-[#faf8f1] transition hover:bg-[#1e493d] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-submit-contact">{addContact.isPending ? 'Adding contact…' : <>Add contact and start chatting <ArrowRight size={15} /></>}</button></form></div></div>}
     </main>
@@ -388,7 +390,7 @@ function Avatar({ name, compact = false }: { name: string; compact?: boolean }) 
 
 function ConversationRow({ conversation, active, onClick, testId }: { conversation: Conversation; active: boolean; onClick: () => void; testId: string }) {
   const last = conversation.lastMessage;
-  const preview = last?.content || 'Start your conversation';
+  const preview = last?.content || (last?.attachments?.length ? 'Shared an attachment' : 'Start your conversation');
   const time = last?.createdAt ? shortTime(last.createdAt) : '';
   return <button type="button" onClick={onClick} className={`flex w-full items-center gap-3 rounded-[17px] px-3 py-3 text-left transition ${active ? 'bg-[#e9eee5]' : 'hover:bg-[#f2f1e9]'}`} data-testid={testId}><Avatar name={conversation.contact.displayName || conversation.contact.email} /><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><span className="truncate text-[13px] font-semibold text-[#30463e]" data-testid={`text-conversation-name-${conversation.id}`}>{conversation.contact.displayName || conversation.contact.email}</span><span className="shrink-0 font-mono-ui text-[9px] text-[#959d95]" data-testid={`text-conversation-time-${conversation.id}`}>{time}</span></span><span className="mt-1 block truncate text-[11px] text-[#829087]" data-testid={`text-conversation-preview-${conversation.id}`}>{preview}</span></span></button>;
 }
@@ -422,21 +424,41 @@ function MediaVideo({ stream, className, muted }: { stream: MediaStream; classNa
   return <video ref={ref} className={className} autoPlay playsInline muted={muted} />;
 }
 
+function MediaAudio({ stream }: { stream: MediaStream }) {
+  const ref = useRef<HTMLAudioElement>(null);
+  useEffect(() => { if (ref.current) ref.current.srcObject = stream; }, [stream]);
+  return <audio ref={ref} autoPlay className="sr-only" aria-label="Remote caller audio" />;
+}
+
 function safeAttachmentUrl(value: string) {
   try {
     const url = new URL(value, window.location.origin);
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+    return url.origin === window.location.origin && url.pathname.startsWith('/api/storage/attachments/') ? url.href : null;
   } catch { return null; }
 }
 
 function fileContentType(name: string) {
   const extension = name.split('.').pop()?.toLowerCase();
-  const types: Record<string, string> = { pdf: 'application/pdf', txt: 'text/plain', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', odp: 'application/vnd.oasis.opendocument.presentation' };
+  const types: Record<string, string> = {
+    avif: 'image/avif', bmp: 'image/bmp', gif: 'image/gif', heic: 'image/heic', jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+    mov: 'video/quicktime', mp4: 'video/mp4', ogv: 'video/ogg', webm: 'video/webm',
+    aac: 'audio/aac', flac: 'audio/flac', m4a: 'audio/mp4', mp3: 'audio/mpeg', oga: 'audio/ogg', ogg: 'audio/ogg', wav: 'audio/wav', weba: 'audio/webm',
+    pdf: 'application/pdf', txt: 'text/plain', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', odp: 'application/vnd.oasis.opendocument.presentation',
+  };
   return types[extension || ''] || 'application/octet-stream';
 }
 
 function isSupportedFile(file: File, contentType: string) {
-  return contentType.startsWith('image/') || contentType.startsWith('video/') || contentType.startsWith('audio/') || ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/vnd.oasis.opendocument.text', 'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.presentation'].includes(contentType) || /\.(pdf|txt|docx?|xlsx?|pptx?|odt|ods|odp)$/i.test(file.name);
+  const supportedTypes = new Set([
+    'image/avif', 'image/bmp', 'image/gif', 'image/heic', 'image/jpeg', 'image/png', 'image/webp',
+    'video/mp4', 'video/webm', 'video/quicktime', 'video/ogg',
+    'audio/aac', 'audio/flac', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/ogg', 'audio/wav', 'audio/webm', 'audio/x-wav',
+    'application/pdf', 'text/plain', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.oasis.opendocument.text', 'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.presentation',
+  ]);
+  const normalizedType = contentType.split(';')[0].trim().toLowerCase();
+  return supportedTypes.has(normalizedType) || /\.(avif|bmp|gif|heic|jpe?g|png|webp|mov|mp4|ogv|webm|aac|flac|m4a|mp3|oga|ogg|wav|weba|pdf|txt|docx?|xlsx?|pptx?|odt|ods|odp)$/i.test(file.name);
 }
 
 function formatBytes(size: number) {

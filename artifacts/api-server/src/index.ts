@@ -2,7 +2,9 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
+import { attachCallSignaling } from "./lib/callSignaling";
 
 const rawPort = process.env["PORT"];
 
@@ -95,8 +97,10 @@ async function waitForChatBackend(): Promise<void> {
 
 const server = await waitForChatBackend().then(
   () =>
-    new Promise<ReturnType<typeof app.listen>>((resolve, reject) => {
-      const httpServer = app.listen(port, () => {
+    new Promise<ReturnType<typeof createServer>>((resolve, reject) => {
+      const httpServer = createServer(app);
+      attachCallSignaling(httpServer);
+      httpServer.listen(port, () => {
         logger.info({ port }, "Server listening");
         resolve(httpServer);
       });
